@@ -1,21 +1,23 @@
+import os
+
+os.environ["USER_AGENT"] = "my-rag/1.0.0"
+
+import bs4
+
 from langchain_openai import ChatOpenAI
 from langchain_openai import OpenAIEmbeddings
-from langchain_core.vectorstores import InMemoryVectorStore
-import bs4
-from langchain_community.document_loaders import WebBaseLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter  # text splitter for general use
 from langchain.tools import tool
 from langchain.agents import create_agent
-from langchain_ollama import ChatOllama
-from langchain_ollama import OllamaEmbeddings
+
+from langchain_core.vectorstores import InMemoryVectorStore
+from langchain_community.document_loaders import WebBaseLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # chat model
-#model = ChatOpenAI(model="gpt-4")
-model = ChatOllama(model="llama3.2:1b", temperature=0)  # ou "mistral", "codellama", etc.
+model = ChatOpenAI(model="gpt-4")
 
 # embeddings model
-#embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
-embeddings = OllamaEmbeddings(model="nomic-embed-text")
+embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
 
 # vector store
 vector_store = InMemoryVectorStore(embeddings)
@@ -33,7 +35,7 @@ docs = loader.load()
 # testing
 assert len(docs) == 1
 print(f"Total characters: {len(docs[0].page_content)}")
-print(docs[0].page_content[:500])
+#print(docs[0].page_content[:500])
 
 # spliting documents
 text_splitter = RecursiveCharacterTextSplitter(
@@ -67,7 +69,6 @@ prompt = (
 )
 agent = create_agent(model, tools, system_prompt=prompt)
 
-# model inference
 query = (
     "What is the standard method for Task Decomposition?\n\n"
     "Once you get the answer, look up common extensions of that method."
