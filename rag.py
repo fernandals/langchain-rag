@@ -10,7 +10,8 @@ from langchain.tools import tool
 from langchain.agents import create_agent
 
 from langchain_core.vectorstores import InMemoryVectorStore
-from langchain_community.document_loaders import WebBaseLoader
+#from langchain_community.document_loaders import WebBaseLoader
+from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # chat model
@@ -22,6 +23,7 @@ embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
 # vector store
 vector_store = InMemoryVectorStore(embeddings)
 
+'''
 # selecting tags to keep from html page
 bs4_strainer = bs4.SoupStrainer(class_=("post-title", "post-header", "post-content"))
 
@@ -31,9 +33,22 @@ loader = WebBaseLoader(
     bs_kwargs={"parse_only": bs4_strainer},
 )
 docs = loader.load()
+'''
+
+# loading document from pdf file
+loader = DirectoryLoader(
+    "pdfs/",
+    glob="**/*.pdf",
+    loader_cls=PyPDFLoader,
+    show_progress=True
+)
+#loader = PyPDFLoader("pdfs/agents-post.pdf")
+docs = loader.load()
 
 # testing
-assert len(docs) == 1
+#assert len(docs) == 1
+print(f"Total de páginas no documento: {len(docs)}")
+print(f"Total characters: {sum(len(doc.page_content) for doc in docs)}")
 print(f"Total characters: {len(docs[0].page_content)}")
 #print(docs[0].page_content[:500])
 
