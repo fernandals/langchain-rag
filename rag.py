@@ -1,4 +1,6 @@
 import os
+from typing import TypedDict, Optional
+
 import bs4
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain.tools import tool
@@ -6,6 +8,8 @@ from langchain.agents import create_agent
 from langchain_core.vectorstores import InMemoryVectorStore
 from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+from langgraph.graph import StateGraph, START, END
 
 # ---------------------- CONFIGURAÇÕES ----------------------------
 os.environ["USER_AGENT"] = "my-rag/1.0.0"
@@ -43,48 +47,83 @@ print("Criando vector store...")
 vector_store = InMemoryVectorStore(embeddings)
 vector_store.add_documents(chunks)
 
-@tool(response_format="content_and_artifact")
-def retrieve_context(query: str):
-    """Retrieve information to help answer a query."""
-    retrieved_docs = vector_store.similarity_search(query, k=3, score_threshold=0.7)
-    serialized = "\n\n".join(
-        (f"Source: {doc.metadata}\nContent: {doc.page_content}")
-        for doc in retrieved_docs
-    )
-    return serialized, retrieved_docs
+# ---------------------- STATE GRAPH ----------------------
+class GraphState(TypedDict):
+    question: str
+    context: Optional[str]
+    answer: Optional[str]
 
-# ---------------------- CRIAÇÃO DO AGENTE ----------------------------
-prompt = (
-    "You have access to a tool that retrieves context from the PDF documents. "
-    "Always use the tool to gather information before answering the user."
-)
 
-agent = create_agent(model, [retrieve_context], system_prompt=prompt)
+def retrieve(state: GraphState) -> GraphState:
+    print("→ Buscando contexto...")
+    docs = vector_store.similarity_search(state["question"], k=3, score_threshold=0.7)
+    
+    context = "\n\n".join([doc.page_content for doc in docs])
+    
+    return {
+        "question": state["question"],
+        "context": context,
+        "answer": None,
+    }
+
+def generate(state: GraphState) -> GraphState:
+    print("→ Gerando resposta...")
+
+    context = state.get("context") or "Nenhum contexto encontrado."
+    question = state["question"]
+
+    prompt = f"""
+Você é um assistente RAG. Use o contexto abaixo para responder.
+
+Contexto:
+{context}
+
+Pergunta:
+{question}
+
+Resposta:"""
+
+    result = model.invoke(prompt)
+
+    return {
+        "question": question,
+        "context": context,
+        "answer": result.content,
+    }
+
+# sempre vai pro retrieve para simplificar
+def should_retrieve(state: GraphState) -> str:
+    return "retrieve"
+
+
+graph = StateGraph(GraphState)
+
+graph.add_node("retrieve", retrieve)
+graph.add_node("generate", generate)
+
+graph.add_conditional_edges(START, should_retrieve)
+
+graph.add_edge("retrieve", "generate")
+graph.add_edge("generate", END)
+
+executor = graph.compile()
 
 
 print("\n===== RAG Interativo =====")
 print("Digite sua pergunta ou 'sair' para encerrar.\n")
 
 while True:
-    user_query = input("\nPergunta: ")
+    question = input("Pergunta: ").strip()
 
-    if user_query.lower().strip() in ["sair", "exit", "quit"]:
+    if question.lower().strip() in ["sair", "exit", "quit"]:
         print("Encerrando...")
         break
 
+    print("\n--- PROCESSANDO... ---\n")
+
+    state = {"question": question, "context": None, "answer": None}
+    result = executor.invoke(state)
+
     print("\n--- RESPOSTA ---\n")
-
-    '''
-    for event in agent.stream(
-        {"messages": [{"role": "user", "content": user_query}]},
-        stream_mode="values",
-    ):
-        event["messages"][-1].pretty_print()
-    '''
-    response = agent.invoke(
-        {"messages": [{"role": "user", "content": user_query}]}
-    )
-    final_response = response["messages"][-1]
-    final_response.pretty_print()
-
+    print(result["answer"])
     print("\n----------------\n")
