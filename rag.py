@@ -1,71 +1,48 @@
 import os
-
-os.environ["USER_AGENT"] = "my-rag/1.0.0"
-
 import bs4
-
-from langchain_openai import ChatOpenAI
-from langchain_openai import OpenAIEmbeddings
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain.tools import tool
 from langchain.agents import create_agent
-
 from langchain_core.vectorstores import InMemoryVectorStore
-#from langchain_community.document_loaders import WebBaseLoader
 from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-# chat model
-model = ChatOpenAI(model="gpt-4")
+# ---------------------- CONFIGURAÇÕES ----------------------------
+os.environ["USER_AGENT"] = "my-rag/1.0.0"
 
-# embeddings model
-embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
+PDF_FOLDER = "pdfs/"
+MODEL_NAME = "gpt-4"
+EMBED_MODEL = "text-embedding-3-large"
 
-# vector store
-vector_store = InMemoryVectorStore(embeddings)
+print("Carregando modelo...")
+model = ChatOpenAI(model=MODEL_NAME)
+embeddings = OpenAIEmbeddings(model=EMBED_MODEL)
 
-'''
-# selecting tags to keep from html page
-bs4_strainer = bs4.SoupStrainer(class_=("post-title", "post-header", "post-content"))
-
-# loading document from url
-loader = WebBaseLoader(
-    web_paths=("https://lilianweng.github.io/posts/2023-06-23-agent/",),
-    bs_kwargs={"parse_only": bs4_strainer},
-)
-docs = loader.load()
-'''
-
-# loading document from pdf file
+print(f"Carregando PDFs da pasta '{PDF_FOLDER}' ...")
 loader = DirectoryLoader(
-    "pdfs/",
+    PDF_FOLDER,
     glob="**/*.pdf",
     loader_cls=PyPDFLoader,
     show_progress=True
 )
-#loader = PyPDFLoader("pdfs/agents-post.pdf")
 docs = loader.load()
 
-# testing
-#assert len(docs) == 1
-print(f"Total de páginas no documento: {len(docs)}")
-print(f"Total characters: {sum(len(doc.page_content) for doc in docs)}")
-print(f"Total characters: {len(docs[0].page_content)}")
-#print(docs[0].page_content[:500])
+print(f"> Total de páginas carregadas: {len(docs)}")
+print(f"> Total de caracteres: {sum(len(doc.page_content) for doc in docs)}")
 
-# spliting documents
+print("Fazendo split dos documentos...")
 text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=1000,  # chunk size (characters)
-    chunk_overlap=200,  # chunk overlap (characters)
-    add_start_index=True,  # track index in original document
+    chunk_size=1000,
+    chunk_overlap=200,
+    add_start_index=True
 )
-all_splits = text_splitter.split_documents(docs)
+chunks = text_splitter.split_documents(docs)
+print(f"> Gerados {len(chunks)} chunks.")
 
-print(f"Split blog post into {len(all_splits)} sub-documents.")
+print("Criando vector store...")
+vector_store = InMemoryVectorStore(embeddings)
+vector_store.add_documents(chunks)
 
-# storing documents
-document_ids = vector_store.add_documents(documents=all_splits)
-
-# setting the vector store to be a tool
 @tool(response_format="content_and_artifact")
 def retrieve_context(query: str):
     """Retrieve information to help answer a query."""
@@ -76,22 +53,38 @@ def retrieve_context(query: str):
     )
     return serialized, retrieved_docs
 
-# creating agent
-tools = [retrieve_context]
+# ---------------------- CRIAÇÃO DO AGENTE ----------------------------
 prompt = (
-    "You have access to a tool that retrieves context from a blog post. "
-    "Use the tool to help answer user queries."
-)
-agent = create_agent(model, tools, system_prompt=prompt)
-
-query = (
-    "What is the standard method for Task Decomposition?\n\n"
-    "Once you get the answer, look up common extensions of that method."
+    "You have access to a tool that retrieves context from the PDF documents. "
+    "Always use the tool to gather information before answering the user."
 )
 
-for event in agent.stream(
-    {"messages": [{"role": "user", "content": query}]},
-    stream_mode="values",
-):
-    event["messages"][-1].pretty_print()
+agent = create_agent(model, [retrieve_context], system_prompt=prompt)
 
+
+print("\n===== RAG Interativo =====")
+print("Digite sua pergunta ou 'sair' para encerrar.\n")
+
+while True:
+    user_query = input("\nPergunta: ")
+
+    if user_query.lower().strip() in ["sair", "exit", "quit"]:
+        print("Encerrando...")
+        break
+
+    print("\n--- RESPOSTA ---\n")
+
+    '''
+    for event in agent.stream(
+        {"messages": [{"role": "user", "content": user_query}]},
+        stream_mode="values",
+    ):
+        event["messages"][-1].pretty_print()
+    '''
+    response = agent.invoke(
+        {"messages": [{"role": "user", "content": user_query}]}
+    )
+    final_response = response["messages"][-1]
+    final_response.pretty_print()
+
+    print("\n----------------\n")
