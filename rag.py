@@ -13,13 +13,20 @@ from typing import Literal
 from langchain.messages import HumanMessage
 from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.graph import StateGraph, START, END
+from typing import TypedDict, List
+from langchain_core.messages import BaseMessage
 
 # ---------------------- CONFIGURAÇÕES ----------------------------
 os.environ["USER_AGENT"] = "my-rag/1.0.0"
 
 PDF_FOLDER = "pdfs/"
-MODEL_NAME = "gpt-4"
+MODEL_NAME = "gpt-4o"
+# gpt-4o-mini também é uma boa opção
 EMBED_MODEL = "text-embedding-3-large"
+
+class RAGState(TypedDict):
+    messages: List[BaseMessage]
+    rewrite_count: int
 
 print("Carregando modelo...")
 model = ChatOpenAI(model=MODEL_NAME)
@@ -66,10 +73,19 @@ retriever_tool = retrieve_info
 
 response_model = init_chat_model(MODEL_NAME, temperature=0)
 
-def generate_query_or_respond(state: MessagesState):
+def generate_query_or_respond(state: RAGState):
     """Call the model to generate a response based on the current state. Given
-    the question, it will decide to retrieve using the retriever tool, or simply respond to the user.
-    """
+    the question, it will decide to retrieve using the retrieval tool or simply 
+    respond to the user."""
+    if state["rewrite_count"] >= 3:
+        return {
+            "messages": [
+                HumanMessage(
+                    content="This question is not related to the knowledge base topic."
+                )
+            ]
+        }
+
     response = (
         response_model
         .bind_tools([retriever_tool]).invoke(state["messages"])  
@@ -77,15 +93,15 @@ def generate_query_or_respond(state: MessagesState):
     return {"messages": [response]}
 
 GRADE_PROMPT = (
-    "You are a grader assessing relevance of a retrieved document to a user question. \n "
-    "Here is the retrieved document: \n\n {context} \n\n"
-    "Here is the user question: {question} \n"
-    "If the document contains keyword(s) or semantic meaning related to the user question, grade it as relevant. \n"
-    "Give a binary score 'yes' or 'no' score to indicate whether the document is relevant to the question."
+    "You are an evaluator analyzing the relevance of a retrieved document to a user's question.\n"
+    "Here is the retrieved document:\n\n {context} \n\n"
+    "Here is the user's question: {question}\n"
+    "If the document contains keywords or semantic meaning related to the user's question, classify it as relevant.\n"
+    "Provide a binary score 'yes' or 'no' to indicate if the document is relevant to the question."
 )
 
-class GradeDocuments(BaseModel):  
-    """Grade documents using a binary score for relevance check."""
+class GradeDocuments(BaseModel):
+    """Evaluates documents using a binary score for relevance checking."""
     binary_score: str = Field(
         description="Relevance score: 'yes' if relevant, or 'no' if not relevant"
     )
@@ -93,9 +109,9 @@ class GradeDocuments(BaseModel):
 grader_model = init_chat_model(MODEL_NAME, temperature=0)
 
 def grade_documents(
-    state: MessagesState,
+    state: RAGState,
 ) -> Literal["generate_answer", "rewrite_question"]:
-    """Determine whether the retrieved documents are relevant to the question."""
+    """Determines if the retrieved documents are relevant to the question."""
     question = state["messages"][0].content
     context = state["messages"][-1].content
 
@@ -110,40 +126,50 @@ def grade_documents(
 
     if score == "yes":
         return "generate_answer"
-    else:
-        return "rewrite_question"
+    
+    if state["rewrite_count"] >= 3:
+        return "generate_query_or_respond"
+    
+    return "rewrite_question"
 
 
 REWRITE_PROMPT = (
-    "Look at the input and try to reason about the underlying semantic intent / meaning.\n"
+    "Analyze the input and try to reason about the underlying intent or semantic meaning.\n"
     "Here is the initial question:"
     "\n ------- \n"
     "{question}"
     "\n ------- \n"
-    "Formulate an improved question:"
+    "Formulate an improved version of the question:"
 )
 
-def rewrite_question(state: MessagesState):
-    """Rewrite the original user question."""
+def rewrite_question(state: RAGState):
+    """Rewrites the original question."""
     messages = state["messages"]
     question = messages[0].content
+
     prompt = REWRITE_PROMPT.format(question=question)
     response = response_model.invoke([{"role": "user", "content": prompt}])
-    return {"messages": [HumanMessage(content=response.content)]}
+
+    return {"messages": [HumanMessage(content=response.content)], "rewrite_count": state["rewrite_count"] + 1}
 
 
 
 GENERATE_PROMPT = (
     "You are an assistant for question-answering tasks. "
-    "Use the following pieces of retrieved context to answer the question. "
-    "If you don't know the answer, just say that you don't know. "
-    "Use three sentences maximum and keep the answer concise.\n"
-    "Question: {question} \n"
+    "Use the following retrieved context to answer the question. "
+    #"If the provided context is insufficient or unrelated to the question, "
+    #"respond exactly with: "
+    #"'This question is not related to the available content.' "
+    "Do not fabricate information. "
+    "Do not try to infer or answer using external knowledge. "
+    "Use no more than three sentences and keep the response concise.\n"
+    "Question: {question}\n"
     "Context: {context}"
 )
 
-def generate_answer(state: MessagesState):
-    """Generate an answer."""
+
+def generate_answer(state: RAGState):
+    """Generates an answer."""
     question = state["messages"][0].content
     context = state["messages"][-1].content
     prompt = GENERATE_PROMPT.format(question=question, context=context)
@@ -153,7 +179,8 @@ def generate_answer(state: MessagesState):
 
 # ---------------------- STATE GRAPH ----------------------
 
-workflow = StateGraph(MessagesState)
+#workflow = StateGraph(MessagesState)
+workflow = StateGraph(RAGState)
 
 workflow.add_node(generate_query_or_respond)
 workflow.add_node("retrieve", ToolNode([retriever_tool]))
@@ -188,7 +215,7 @@ while True:
         print("Encerrando...")
         break
 
-    response = graph.invoke({"messages": [{"role": "user", "content": question}]})
+    response = graph.invoke({"messages": [{"role": "user", "content": question}], "rewrite_count": 0})
     
     print("\n--- RESPOSTA ---\n")
     print(response["messages"][-1].content)
