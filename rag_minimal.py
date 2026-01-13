@@ -18,6 +18,7 @@ from langchain_core.messages import BaseMessage
 from langchain_core.messages import AIMessage, ToolMessage, HumanMessage, SystemMessage
 from typing_extensions import Annotated
 from langgraph.graph import add_messages
+from langgraph.graph import MessagesState
 
 # ---------------------- CONFIGURAÇÕES ----------------------------
 os.environ["USER_AGENT"] = "my-rag/1.0.0"
@@ -26,8 +27,8 @@ PDF_FOLDER = "pdfs/"
 MODEL_NAME = "gpt-4o-mini"
 EMBED_MODEL = "text-embedding-3-large"
 
-class RAGState(TypedDict):
-    messages: Annotated[List[BaseMessage], add_messages]
+class RAGState(MessagesState):
+    documents: list[str]
 
 print("Carregando modelo...")
 model = ChatOpenAI(model=MODEL_NAME)
@@ -71,7 +72,21 @@ def retrieve_info(query: str) -> str:
 
 retriever_tool = retrieve_info
 
-response_model = init_chat_model(MODEL_NAME, temperature=0)
+SYSADL_SYSTEM_PROMPT = """
+You are a domain-specific assistant specialized exclusively in SysADL architectural styles.
+
+You are only allowed to handle questions that belong to the SysADL architectural styles domain.
+If a user asks about anything outside this domain, you must refuse by saying:
+"This question is not related to the available content."
+
+Never answer questions about general knowledge, science, geography, history, or any topic
+that is not strictly about SysADL architectural styles.
+""".strip()
+
+response_model = init_chat_model(
+    MODEL_NAME, 
+    temperature=0
+).bind_tools([retriever_tool])
 
 def generate_query_or_respond(state: RAGState):
     """Call the model to generate a response based on the current state. Given
@@ -79,33 +94,38 @@ def generate_query_or_respond(state: RAGState):
     respond to the user."""
 
     response = (
-        response_model
-        .bind_tools([retriever_tool]).invoke(state["messages"])  
+        response_model.invoke([SystemMessage(SYSADL_SYSTEM_PROMPT)] + state["messages"])  
     )
     return {"messages": [response]}
 
-GENERATE_PROMPT = (
-    "You are a strict question-answering assistant.\n\n"
+GENERATE_PROMPT = """
+You must decide whether the provided context explicitly contains the answer
+to the given question about SysADL architectural styles.
 
-    "You MUST follow this process:\n"
-    "1. First, determine whether the provided context contains information "
-    "that directly answers the question.\n"
-    "2. If the context does NOT explicitly contain the answer, or is only "
-    "loosely related, you MUST respond exactly with:\n"
-    "'This question is not related to the available content.'\n"
-    "3. Only if the answer is clearly and directly supported by the context, "
-    "you may answer.\n\n"
+Follow this procedure:
 
-    "Rules:\n"
-    "- Do NOT use external knowledge.\n"
-    "- Do NOT infer, assume, or complete missing information.\n"
-    "- Do NOT answer partially.\n"
-    "- The answer must be fully grounded in the context.\n"
-    "- Use no more than three sentences.\n\n"
+1. If the question is not about SysADL architectural styles, respond exactly:
+"This question is not related to the available content."
 
-    "Question:\n{question}\n\n"
-    "Context:\n{context}"
-)
+2. If the question is about SysADL but the provided context does NOT explicitly
+and directly contain the answer, respond exactly:
+"This question is not related to the available content."
+
+3. Only if the answer is clearly and directly supported by the context, you may answer.
+
+Strict rules:
+- Do NOT use external knowledge.
+- Do NOT infer, assume, or complete missing information.
+- Do NOT provide partial answers.
+- The answer must be fully grounded in the provided context.
+- Use no more than three sentences.
+
+Question:
+{question}
+
+Context:
+{context}
+""".strip()
 
 def generate_answer(state: RAGState):
     """Generates an answer."""
@@ -147,8 +167,8 @@ workflow.add_edge("retrieve", "generate_answer")
 workflow.add_edge("generate_answer", END)
 graph = workflow.compile()
 
-#print("--> Graph Visualization:")
-#print(graph.get_graph().draw_ascii())
+print("--> Graph Visualization:")
+print(graph.get_graph().draw_ascii())
 
 print("\n===== RAG INTERATIVO (COM ETAPAS) =====")
 print("Digite sua pergunta ou 'sair' para encerrar.\n")
