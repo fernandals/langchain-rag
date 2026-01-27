@@ -38,7 +38,7 @@ print(f"Carregando PDFs da pasta '{PDF_FOLDER}' ...")
 loader = DirectoryLoader(
     PDF_FOLDER,
     glob="**/*.pdf",
-    loader_cls=PyPDFLoader,
+    loader_cls=PyPDFLoader, # type: ignore
     show_progress=True
 )
 docs = loader.load()
@@ -206,7 +206,7 @@ while True:
         "messages": [{"role": "user", "content": question}],
     }
 
-    for step in graph.stream(inputs):
+    for step in graph.stream(inputs): # type: ignore
         for node_name, state in step.items():
             print(f"\n--- NÓ EXECUTADO: {node_name} ---")
 
