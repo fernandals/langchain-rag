@@ -1,5 +1,7 @@
 from enum import Enum
 import os
+import re
+import fitz
 from pypdf import PdfReader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document as LCDocument
@@ -20,7 +22,7 @@ class IngestedDocument:
         pages: list[str] | None = None
     ):
         self.text = text
-        self.pages = pages # util pra slides
+        self.pages = pages
         self.metadata = metadata
 
 class Chunk:
@@ -30,53 +32,86 @@ class Chunk:
 
 class DocumentLoader:
     def load(self, file_path: str) -> IngestedDocument:
-        ext = os.path.splitext(file_path)[1].lower()
+        extension = os.path.splitext(file_path)[1].lower()
 
-        if ext == ".pdf":
+        if extension == ".pdf":
             return self._load_pdf(file_path)
 
-        raise ValueError(f"Formato não suportado: {ext}")
+        raise ValueError(f"Formato não suportado: {extension}")
     
     def _load_pdf(self, file_path: str) -> IngestedDocument:
-        reader = PdfReader(file_path)
+        doc = fitz.open(file_path)
+        
+        num_pages = doc.page_count
+        doc_type = self._detect_pdf_type(doc[0])
 
-        pages_text = []
-        full_text = []
+        full_text = ""
+        page_offsets = []
 
-        for page in reader.pages:
-            text = page.extract_text() or ""
-            text = self._normalize_text(text)
-
-            pages_text.append(text)
-            full_text.append(text)
-
-        first_page = reader.pages[0]
-        width = first_page.mediabox[2]
-        height = first_page.mediabox[3]
-        aspect_ratio = width / height
-
-        if aspect_ratio > 1.1:
-            doc_type = DocumentType.SLIDES
-        else:
-            doc_type = DocumentType.TEXT_PDF
+        for page_number, page in enumerate(doc): # type: ignore
+            text = page.get_text("text")
+            page_offsets.append({
+                "page": page_number + 1,
+                "start": len(full_text)
+            })
+            full_text += text + "\n"
 
         metadata = {
             "source": os.path.basename(file_path),
             "file_path": file_path,
-            "num_pages": len(pages_text),
+            "num_pages": num_pages,
             "doc_type": doc_type.value
         }
 
         return IngestedDocument(
-            text="\n".join(full_text),
-            pages=pages_text,
+            text=full_text,
+            pages=page_offsets,
             metadata=metadata
         )
-    
-    def _normalize_text(self, text: str) -> str:
-        text = text.replace("\x00", "")
-        text = text.strip()
-        return text
+
+    def _detect_pdf_type(self, page: fitz.Page) -> DocumentType:
+        width = page.mediabox_size[0]
+        height = page.mediabox_size[1]
+
+        return (
+            DocumentType.SLIDES
+            if width / height > 1.1
+            else DocumentType.TEXT_PDF
+        )
+
+class SectionDetector:
+    SECTION_PATTERNS = [
+        # 1. Introduction / 2.3 Client-Server Architecture
+        r"^(\d+(\.\d+)*)\s+.+",
+
+        # CHAPTER 4 - Architectural Styles
+        r"^CHAPTER\s+\d+.*",
+
+        # TITLES
+        r"^[A-Z][A-Z\s]{5,}$"
+    ]
+
+    def detect(self, text: str) -> list[dict]:
+        sections = []
+        lines = text.splitlines()
+
+        char_index = 0  # posição absoluta no texto
+
+        for line in lines:
+            stripped = line.strip()
+
+            for pattern in self.SECTION_PATTERNS:
+                if re.match(pattern, stripped):
+                    sections.append({
+                        "title": stripped,
+                        "start_index": char_index
+                    })
+                    break
+
+            # +1 por causa do '\n'
+            char_index += len(line) + 1
+
+        return sections
 
 # Parsers por tipo de documento
 class BaseParser:
@@ -84,8 +119,37 @@ class BaseParser:
         raise NotImplementedError
     
 class PDFTextParser(BaseParser):
+    def __init__(self):
+        self.section_detector = SectionDetector()
+
     def parse(self, doc: IngestedDocument) -> IngestedDocument:
-        # Texto contínuo não tem estrutura confiável
+        sections = self.section_detector.detect(doc.text)
+        doc.metadata["sections"] = sections
+        return doc
+
+class SectionAwarePDFParser(BaseParser):
+    SECTION_REGEX = re.compile(
+        r"(?m)^(\d+(?:\.\d+)*)\s{2,}([A-Z][^\n]{3,80})$"
+    )
+
+    def parse(self, doc: IngestedDocument) -> IngestedDocument:
+        text = doc.text
+        sections = []
+
+        matches = list(self.SECTION_REGEX.finditer(text))
+
+        for i, m in enumerate(matches):
+            start = m.start()
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+
+            sections.append({
+                "section_id": m.group(1),
+                "title": m.group(2).strip(),
+                "start": start,
+                "end": end
+            })
+
+        doc.metadata["sections"] = sections
         return doc
 
 class SlidePDFParser(BaseParser):
@@ -121,7 +185,8 @@ class ParserFactory:
             return SlidePDFParser()
 
         if doc_type == DocumentType.TEXT_PDF.value:
-            return PDFTextParser()
+            #return PDFTextParser()
+            return SectionAwarePDFParser()
 
         raise ValueError(f"Parser não suportado para {doc_type}")
 
@@ -238,6 +303,16 @@ class MetadataEnricher:
         # -------- Chunk --------
         enriched_metadata.update(chunk.metadata)
 
+        # -------- PDF texto --------
+        if enriched_metadata["doc_type"] == DocumentType.TEXT_PDF.value:
+            sections = doc.metadata.get("sections", [])
+            start_index = enriched_metadata.get("start_index")
+
+            if start_index is not None and sections:
+                section = self._find_section_for_index(start_index, sections)
+                if section:
+                    enriched_metadata["section_title"] = section["title"]
+
         # -------- Slides --------
         if enriched_metadata["doc_type"] == DocumentType.SLIDES.value:
             slides = doc.metadata.get("slides", [])
@@ -251,6 +326,21 @@ class MetadataEnricher:
             content=chunk.content,
             metadata=enriched_metadata
         )
+
+    def _find_section_for_index(
+        self,
+        start_index: int,
+        sections: list[dict]
+    ) -> dict | None:
+        current = None
+
+        for section in sections:
+            if section["start_index"] <= start_index:
+                current = section
+            else:
+                break
+
+        return current
 
 # futura implementação de armazenamento em banco de dados
 class StorageAdapter:
@@ -277,12 +367,20 @@ class IngestionPipeline:
         print("[INGESTION] Loading document...")
         doc = self.loader.load(file_path)
 
+        print("==== PRIMEIROS 1000 CHARS ====")
+        print(doc.text[:1000])
+
+        print("\n==== QUEBRAS DE LINHA (repr) ====")
+        print(repr(doc.text[:500]))
+
         doc_type = doc.metadata.get("doc_type")
         print(f"[INGESTION] Detected document type: {doc_type}")
 
         parser = ParserFactory.get_parser(doc_type) # type: ignore
         print(f"[INGESTION] Using parser: {parser.__class__.__name__}")
         doc = parser.parse(doc)
+
+        print(doc.metadata)
 
         splitter = SplitterFactory.get_splitter(doc_type) # type: ignore
         print(f"[INGESTION] Using splitter: {splitter.__class__.__name__}")
@@ -318,25 +416,21 @@ def main():
     )
 
     # PDF texto
-    chunks_text = pipeline.ingest(
-        "pdfs/SAIA-Chapter12.pdf"
-    )
+    chunks_text = pipeline.ingest("pdfs/SAIA-Chapter12.pdf")
 
-    print(chunks_text[0].metadata)
-    print(chunks_text[1].metadata)
-    print(chunks_text[1].content[:200])
+    print(f"Metadata do primeiro chunk:\n{chunks_text[0].metadata}")
+    print(f"Content do primeiro chunk:\n{chunks_text[0].content[:200]}")
+    print("-----")
+    print(f"Metadata do segundo chunk:\n{chunks_text[1].metadata}")
+    print(f"Content do segundo chunk:\n{chunks_text[1].content[:200]}")
+
 
     # Slides
-    chunks_slides = pipeline.ingest(
-        "pdfs/SAIA-Chapter2-slide.pdf"
-    )
+    #chunks_slides = pipeline.ingest("pdfs/SAIA-Chapter2-slide.pdf")
 
-    print(chunks_slides[0].metadata)
-    print(chunks_slides[1].metadata)
-    print(chunks_slides[1].content[:200])
-
-
-    
+    #(chunks_slides[0].metadata)
+    #print(chunks_slides[1].metadata)
+    #print(chunks_slides[1].content[:200])  
 
 if __name__ == "__main__":
     main()
