@@ -1,6 +1,6 @@
 from rag.splitter import spliting_documents
 from rag.vectorstore import build_vectorstore
-from rag.tools import retrieve_info
+from agent.tools import build_retrieve_tool
 import agent.prompts as prompts
 from agent.graph import build_graph
 from student_model.profile import StudentProfile
@@ -8,6 +8,7 @@ from langchain_core.messages import AIMessage, ToolMessage, HumanMessage, System
 import os
 from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
+from agent.state import TutorState, TutorConfig
 
 load_dotenv()
 
@@ -23,3 +24,79 @@ if __name__ == "__main__":
   chunks_table = spliting_documents(docs)
   
   retriever = build_vectorstore(chunks_table)
+
+  retrieve_tool = build_retrieve_tool(retriever)
+
+  config = TutorConfig(
+    subject="Software Architecture"
+  )
+
+  response_model = init_chat_model(
+      os.getenv("MODEL_NAME", "gpt-4o-mini"), 
+      temperature=os.getenv("MODEL_TEMPERATURE", 0)
+  ).bind_tools([retrieve_tool])
+
+  graph = build_graph(config, retrieve_tool, response_model)
+
+  print("\n===== RAG INTERATIVO (COM ETAPAS) =====")
+  print("Digite sua pergunta ou 'sair' para encerrar.\n")
+
+  conversation_state = {
+      "messages": [],
+      "profile": StudentProfile()
+  }
+
+  while True:
+      question = input("Pergunta: ").strip()
+
+      if question.lower() in ["sair", "exit", "quit"]:
+          print("Encerrando...")
+          break
+
+      print("\n===== INÍCIO DO PIPELINE RAG =====\n")
+
+      conversation_state["messages"].append(
+          HumanMessage(content=question)
+      )
+
+      for step in graph.stream(conversation_state): # type: ignore
+          for node_name, state in step.items():
+              print(f"\n--- NÓ EXECUTADO: {node_name} ---")
+
+              # DEBUG DO PERFIL
+              if "profile" in state:
+                  profile = state["profile"]
+
+                  print("\n[DEBUG] Perfil do aluno:")
+                  print(f"perfil_atual: {profile.current_profile}")
+                  print(f"confianca: {profile.confidence:.2f}")
+                  print("sinais:")
+                  print(f"  pede_exercicio: {profile.asks_exercise}")
+                  print(f"  pede_detalhe: {profile.asks_detail}")
+                  print(f"  pede_objetividade: {profile.asks_objectivity}")
+
+              if "messages" in state:
+                  print("\nMensagens:")
+                  for msg in state["messages"]:
+                      print(f"\nTipo: {type(msg).__name__}")
+
+                      if isinstance(msg, HumanMessage):
+                          print("Human:", msg.content)
+
+                      elif isinstance(msg, AIMessage):
+                          if msg.content:
+                              print("AI:", msg.content)
+                          if msg.tool_calls:
+                              print("Tool calls:", msg.tool_calls)
+
+                      elif isinstance(msg, ToolMessage):
+                          print("Tool result:", msg.content)
+
+      conversation_state = state
+
+      print("\n===== RESPOSTA FINAL =====\n")
+      print(conversation_state["messages"][-1].content)
+      print("\n===== PERFIL DO ALUNO =====\n")
+      print(f"Perfil atual: {conversation_state['profile'].current_profile}")
+      print(f"Confiança: {conversation_state['profile'].confidence:.2f}")
+      print("\n==========================\n")

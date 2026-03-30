@@ -11,7 +11,7 @@ def update_profile(profile: StudentProfile, user_message: str) -> StudentProfile
     text = user_message.lower()
 
     if "exercise" in text or "practice" in text:
-    profile.asks_exercise += 1
+        profile.asks_exercise += 1
 
     if "detail" in text or "example" in text:
         profile.asks_detail += 1
