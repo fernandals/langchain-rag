@@ -31,6 +31,14 @@ if __name__ == "__main__":
     subject="Software Architecture"
   )
 
+  tutor_prompt = SystemMessage(content=prompts.SYSTEM_PROMPT.format(
+        domain=config.subject,
+        max_sentences=config.max_sentences,
+        course_level=config.course_level,
+        answer_language=config.answer_language
+        )
+    )
+
   response_model = init_chat_model(
       os.getenv("MODEL_NAME", "gpt-4o-mini"), 
       temperature=os.getenv("MODEL_TEMPERATURE", 0)
@@ -42,7 +50,7 @@ if __name__ == "__main__":
   print("Digite sua pergunta ou 'sair' para encerrar.\n")
 
   conversation_state = {
-      "messages": [],
+      "messages": [tutor_prompt],
       "profile": StudentProfile()
   }
 
