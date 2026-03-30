@@ -1,5 +1,6 @@
 import fitz
 from rag.models import DocumentType
+import math
 
 def detect_pdf_type(page: fitz.Page) -> DocumentType:
   width = page.mediabox_size[0]
@@ -21,3 +22,8 @@ def extract_slide_structure(text: str) -> tuple[str, str]:
   body = "\n".join(lines[1:])
 
   return title, body
+
+def softmax(scores):
+    exp_scores = {k: math.exp(v) for k, v in scores.items()}
+    total = sum(exp_scores.values())
+    return {k: v / total for k, v in exp_scores.items()}
