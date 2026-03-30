@@ -6,12 +6,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-def build_vectorstore(chunks: list[Document]) -> list[Document]:
-  embeddings_model = os.getenv("EMBED_MODEL")
+def build_vectorstore(chunks: list[list[Document]]) -> list[Document]:
+  embeddings_model = os.getenv("EMBED_MODEL", "text-embedding-3-small")
   embeddings = OpenAIEmbeddings(model=embeddings_model)
 
   vectorstore = InMemoryVectorStore.from_documents(
-    documents=chunks, embedding=embeddings
+    documents=[chunk for chunk_list in chunks for chunk in chunk_list], embedding=embeddings
   )
 
   return vectorstore.as_retriever()
