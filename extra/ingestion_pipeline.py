@@ -120,12 +120,36 @@ class BaseParser:
     
 class PDFTextParser(BaseParser):
     def __init__(self):
-        self.section_detector = SectionDetector()
+        #self.section_detector = SectionDetector()
+        self.section_regex = re.compile(
+            r"""
+            ^(?P<number>\d+(?:\.\d+)*)      # número 12 ou 12.3
+            \s{1,3}
+            (?P<title>[A-Z][A-Za-z0-9\s\-\(\),]{3,80})  # título controlado
+            $
+            """,
+            re.MULTILINE | re.VERBOSE
+        )
 
+    def parse(self, doc: IngestedDocument) -> IngestedDocument:
+        pass
+
+    def _find_page_for_index(self, index: int, page_offsets: list[dict]) -> int | None:
+        for i in range(len(page_offsets)):
+            if i + 1 < len(page_offsets):
+                if page_offsets[i]["start"] <= index < page_offsets[i+1]["start"]:
+                    return page_offsets[i]["page"]
+            else:
+                return page_offsets[i]["page"]
+        return None
+
+    '''
     def parse(self, doc: IngestedDocument) -> IngestedDocument:
         sections = self.section_detector.detect(doc.text)
         doc.metadata["sections"] = sections
         return doc
+    '''
+    
 
 class SectionAwarePDFParser(BaseParser):
     SECTION_REGEX = re.compile(
