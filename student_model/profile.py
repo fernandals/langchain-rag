@@ -5,5 +5,5 @@ class StudentProfile(BaseModel):
     asks_detail: int = 0
     asks_objectivity: int = 0
 
-    current_profile: str = "neutral"
+    current_profile: str = "neutral" # "analytical", "explorer", "objective", "neutral"
     confidence: float = 0.0

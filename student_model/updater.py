@@ -1,7 +1,7 @@
 from student_model.profile import StudentProfile
 from utils.helpers import softmax
 
-def update_profile(profile: StudentProfile, user_message: str) -> StudentProfile:
+def update_student_profile(profile: StudentProfile, user_message: str) -> StudentProfile:
     DECAY = 0.8
 
     profile.asks_exercise *= DECAY
@@ -31,3 +31,7 @@ def update_profile(profile: StudentProfile, user_message: str) -> StudentProfile
     profile.confidence = probs[profile.current_profile]
 
     return profile
+
+def update_conversation_topic(topic: str, user_message: str) -> str:
+    # só funciona com LLM então vamos mudar isso aqui pra a llm que atualiza o topico vai atualizar também o perfil do aluno, dai a gente pode usar o mesmo prompt pra isso e evitar chamadas desnecessárias
+    return topic
