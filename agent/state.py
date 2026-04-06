@@ -10,5 +10,5 @@ class TutorConfig(BaseModel):
     max_sentences: int = 6
 
 class TutorState(MessagesState):
-    profile: StudentProfile
+    student_profile: StudentProfile
     current_topic: str | None = None
