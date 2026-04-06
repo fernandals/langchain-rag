@@ -21,7 +21,7 @@ if __name__ == "__main__":
 
   parsed_docs = parse_documents(docs)
 
-  chunks_table = spliting_documents(docs)
+  chunks_table = spliting_documents(parsed_docs)
   
   retriever = build_vectorstore(chunks_table)
 
@@ -49,10 +49,13 @@ if __name__ == "__main__":
   print("\n===== RAG INTERATIVO (COM ETAPAS) =====")
   print("Digite sua pergunta ou 'sair' para encerrar.\n")
 
-  conversation_state = {
-      "messages": [tutor_prompt],
-      "profile": StudentProfile()
-  }
+  conversation_state = TutorState(
+    messages=[tutor_prompt],
+    student_profile=StudentProfile(),
+    current_topic=None
+  )
+
+  print("Student Profile:", conversation_state["student_profile"])
 
   while True:
       question = input("Pergunta: ").strip()
@@ -72,8 +75,8 @@ if __name__ == "__main__":
               print(f"\n--- NÓ EXECUTADO: {node_name} ---")
 
               # DEBUG DO PERFIL
-              if "profile" in state:
-                  profile = state["profile"]
+              if "student_profile" in state:
+                  profile = state["student_profile"]
 
                   print("\n[DEBUG] Perfil do aluno:")
                   print(f"perfil_atual: {profile.current_profile}")
@@ -105,6 +108,6 @@ if __name__ == "__main__":
       print("\n===== RESPOSTA FINAL =====\n")
       print(conversation_state["messages"][-1].content)
       print("\n===== PERFIL DO ALUNO =====\n")
-      print(f"Perfil atual: {conversation_state['profile'].current_profile}")
-      print(f"Confiança: {conversation_state['profile'].confidence:.2f}")
+      print(f"Perfil atual: {conversation_state['student_profile'].current_profile}")
+      print(f"Confiança: {conversation_state['student_profile'].confidence:.2f}")
       print("\n==========================\n")
