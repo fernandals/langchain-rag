@@ -8,7 +8,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from rag.loader import load_documents, parse_documents
 from rag.splitter import spliting_documents
-from rag.vectorstore import build_vectorstore
+#from rag.vectorstore import build_vectorstore
+from rag.knowledge_base import load_knowledge_base
 from agent.tools import build_retrieve_tool
 from agent.graph import build_graph
 import agent.prompts as prompts
@@ -26,11 +27,12 @@ PDF_PATH = Path("pdfs/")
 # ---------------------- PIPELINE ----------------------
 @st.cache_resource(show_spinner=True)
 def load_pipeline():
-    docs = load_documents(PDF_PATH)
-    parsed_docs = parse_documents(docs)
-    chunks_table = spliting_documents(parsed_docs)
+    #docs = load_documents(PDF_PATH)
+    #parsed_docs = parse_documents(docs)
+    #chunks_table = spliting_documents(parsed_docs)
+    #retriever = build_vectorstore(chunks_table)
 
-    retriever = build_vectorstore(chunks_table)
+    retriever = load_knowledge_base("Software Architecture")
     retrieve_tool = build_retrieve_tool(retriever)
 
     config = TutorConfig(subject="Software Architecture")
