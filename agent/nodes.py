@@ -44,22 +44,24 @@ def generate_answer(state: TutorState, config: TutorConfig, model):
         [system_prompt] + state["messages"]
     )
 
-    # ------ self-check --------
-    check_prompt = SystemMessage(
-        content=prompts.SELF_CHECK_PROMPT.format(
-            answer=response.content,
-            question=question,
-            context=context
-        )
-    )
+    # # ------ self-check --------
+    # check_prompt = SystemMessage(
+    #     content=prompts.SELF_CHECK_PROMPT.format(
+    #         answer=response.content,
+    #         question=question,
+    #         context=context
+    #     )
+    # )
 
-    check_response = model.invoke([check_prompt])
+    # check_response = model.invoke([check_prompt])
 
-    # ------ decisao --------
-    if check_response.content.strip() != "OK":
-        final_response = AIMessage(content=check_response.content)
-    else:
-        final_response = response
+    # # ------ decisao --------
+    # if check_response.content.strip() != "OK" or "OK" not in check_response.content.strip():
+    #     final_response = AIMessage(content=check_response.content)
+    # else:
+    #     final_response = response
+
+    final_response = response
 
     return {"messages": [final_response], "student_profile": state["student_profile"]}
 

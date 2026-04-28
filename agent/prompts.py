@@ -125,8 +125,5 @@ Check:
 
 If all answers are "yes", respond only with: OK
 
-Otherwise, rewrite the answer and respond only with the improved version. Focus on following the guidelines:
-- Be helpful but not fully give the answer
-- Use the context explicitly
-- Guide the student with reasoning or questions
+Otherwise, rewrite the answer and respond only with the improved version.
 """

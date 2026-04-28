@@ -5,7 +5,7 @@ import os
 import re
 from pathlib import Path
 
-def load_documents(folder_pth: Path) -> list[RawDocument]:
+def load_documents(folder_pth: str) -> list[RawDocument]:
   print(f"Carregando PDFs da pasta '{folder_pth}' ...")
 
   docs = []
@@ -31,8 +31,8 @@ def load_documents(folder_pth: Path) -> list[RawDocument]:
       full_text += text + "\n"
 
     metadata = {
-      "source": file_pth,
-      "file_path": os.path.basename(file_pth),
+      "source": str(file_pth),
+      "file_path": str(os.path.basename(file_pth)),
       "num_pages": num_pages,
       "doc_type": doc_type.value
     }

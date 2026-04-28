@@ -21,3 +21,8 @@ class DocumentChunk:
     def __init__(self, content: str, metadata: dict):
         self.content = content
         self.metadata = metadata
+
+class KnowledgeBase:
+    def __init__(self, name: str, retriever):
+        self.name = name
+        self.retriever = retriever
